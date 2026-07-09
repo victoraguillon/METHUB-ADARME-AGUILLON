@@ -1,11 +1,12 @@
-import { getObjectById, searchObjects } from '../api.js';
-import { createElement, createErrorState, createLoadingState, formatValue } from './components.js';
+import { fetchDepartments, getObjectById, resolveArtworkIds, searchObjects } from '../api.js';
+import { createElement, createErrorState, createLoadingState, formatValue, showFullscreenImage } from './components.js';
 
 function createResultCard(artwork, onSelect, selected, disabled) {
   const card = createElement('article', `result-card ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`);
   const title = createElement('strong', '', formatValue(artwork.title, 'Sin título'));
   const artist = createElement('p', 'card-meta', formatValue(artwork.artistDisplayName, 'Artista desconocido'));
-  card.append(title, artist);
+  const info = createElement('p', 'result-meta', formatValue(artwork.objectDate, 'Fecha desconocida'));
+  card.append(title, artist, info);
   if (!disabled) {
     card.addEventListener('click', () => onSelect(artwork));
   }
@@ -34,7 +35,7 @@ export async function renderCompare(rootElement, _param, params = {}) {
   try {
     const panel = createElement('section', 'panel');
     const title = createElement('h2', '', 'Comparador interactivo');
-    const intro = createElement('p', '', 'Elige dos obras y observa sus diferencias de forma inmediata.');
+    const intro = createElement('p', '', 'Elige dos obras desde departamentos distintos y observa sus diferencias de forma inmediata.');
     const actions = createElement('div', 'compare-actions');
     const clearButton = createElement('button', 'button secondary', 'Limpiar comparación');
     clearButton.type = 'button';
@@ -55,6 +56,8 @@ export async function renderCompare(rootElement, _param, params = {}) {
       state.errorB = '';
       state.queryA = '';
       state.queryB = '';
+      state.departmentA = null;
+      state.departmentB = null;
       state.activeRequestA += 1;
       state.activeRequestB += 1;
       state.abortControllerA = null;
@@ -67,21 +70,44 @@ export async function renderCompare(rootElement, _param, params = {}) {
     const state = {
       a: null,
       b: null,
+      departments: [],
+      departmentA: null,
+      departmentB: null,
       resultsA: [],
       resultsB: [],
       loadingA: false,
       loadingB: false,
+      loadingDepartments: false,
       errorA: '',
       errorB: '',
+      errorDepartments: '',
       queryA: '',
       queryB: '',
       activeRequestA: 0,
       activeRequestB: 0,
       abortControllerA: null,
-      abortControllerB: null
+      abortControllerB: null,
+      abortControllerDepartments: null
     };
 
-    const loadRandomArtwork = async (targetKey) => {
+    const fetchDepartmentsList = async () => {
+      state.loadingDepartments = true;
+      state.errorDepartments = '';
+      render();
+      try {
+        const data = await fetchDepartments();
+        state.departments = data.departments || [];
+      } catch (error) {
+        if (error.name === 'AbortError' || !active) return;
+        state.errorDepartments = error.message || 'No se pudieron cargar los departamentos';
+      } finally {
+        if (!active) return;
+        state.loadingDepartments = false;
+        render();
+      }
+    };
+
+    const loadRandomArtwork = async (targetKey, departmentId = null) => {
       const loadingKey = targetKey === 'a' ? 'loadingA' : 'loadingB';
       const errorKey = targetKey === 'a' ? 'errorA' : 'errorB';
       const queryKey = targetKey === 'a' ? 'queryA' : 'queryB';
@@ -104,7 +130,15 @@ export async function renderCompare(rootElement, _param, params = {}) {
 
       try {
         const randomQueries = ['painting', 'sculpture', 'statue', 'portrait', 'vase', 'bronze'];
-        const data = await searchObjects({ q: randomQueries[Math.floor(Math.random() * randomQueries.length)], hasImages: true, size: 5 }, { signal: controller.signal });
+        const params = {
+          q: randomQueries[Math.floor(Math.random() * randomQueries.length)],
+          hasImages: true,
+          size: 10,
+        };
+        if (departmentId) {
+          params.departmentId = departmentId;
+        }
+        const data = await searchObjects(params, { signal: controller.signal });
         if (!active || controller.signal.aborted || requestId !== state[requestKey]) return;
 
         const ids = (data.objectIDs || []).filter((id) => id !== state[otherKey]?.objectID);
@@ -136,42 +170,138 @@ export async function renderCompare(rootElement, _param, params = {}) {
       }
     };
 
+    const loadDepartmentArtworks = async (targetKey) => {
+      const loadingKey = targetKey === 'a' ? 'loadingA' : 'loadingB';
+      const errorKey = targetKey === 'a' ? 'errorA' : 'errorB';
+      const resultsKey = targetKey === 'a' ? 'resultsA' : 'resultsB';
+      const queryKey = targetKey === 'a' ? 'queryA' : 'queryB';
+      const departmentKey = targetKey === 'a' ? 'departmentA' : 'departmentB';
+      const requestKey = targetKey === 'a' ? 'activeRequestA' : 'activeRequestB';
+      const controllerKey = targetKey === 'a' ? 'abortControllerA' : 'abortControllerB';
+
+      if (!state[departmentKey]) {
+        state[resultsKey] = [];
+        render();
+        return;
+      }
+
+      if (state[controllerKey]) {
+        state[controllerKey].abort();
+      }
+      const controller = new AbortController();
+      state[controllerKey] = controller;
+      state[requestKey] += 1;
+      const requestId = state[requestKey];
+
+      state[loadingKey] = true;
+      state[errorKey] = '';
+      render();
+
+      try {
+        const term = state[queryKey]?.trim() || 'a';
+        const data = await searchObjects({ q: term, departmentId: state[departmentKey], hasImages: true, size: 20 }, { signal: controller.signal });
+        if (!active || controller.signal.aborted || requestId !== state[requestKey]) return;
+
+        const ids = (data.objectIDs || []).slice(0, 15);
+        const artworks = ids.length ? await resolveArtworkIds(ids) : [];
+        if (!active || controller.signal.aborted || requestId !== state[requestKey]) return;
+
+        state[resultsKey] = artworks;
+      } catch (error) {
+        if (error.name === 'AbortError' || !active) {
+          return;
+        }
+        state[resultsKey] = [];
+        state[errorKey] = error.message || 'No se pudo buscar obras en este departamento';
+      } finally {
+        if (!active || controller.signal.aborted || requestId !== state[requestKey]) return;
+        state[loadingKey] = false;
+        render();
+      }
+    };
+
     const render = () => {
       const compareGrid = createElement('section', 'compare-grid');
 
       const buildPanel = (targetKey) => {
+        const panelKey = targetKey === 'a' ? 'A' : 'B';
         const card = createElement('article', 'card');
-        const heading = createElement('h3', '', targetKey === 'a' ? 'Obra A' : 'Obra B');
+        const heading = createElement('h3', '', `Elige obra ${panelKey}`);
+        const departmentKey = targetKey === 'a' ? 'departmentA' : 'departmentB';
+        const queryKey = targetKey === 'a' ? 'queryA' : 'queryB';
+        const loadingKey = targetKey === 'a' ? 'loadingA' : 'loadingB';
+        const errorKey = targetKey === 'a' ? 'errorA' : 'errorB';
+        const resultsKey = targetKey === 'a' ? 'resultsA' : 'resultsB';
+
+        const departmentLabel = createElement('label', 'label', 'Departamento');
+        departmentLabel.htmlFor = `dept-${panelKey}`;
+        const departmentSelect = createElement('select', 'select');
+        departmentSelect.id = `dept-${panelKey}`;
+        departmentSelect.setAttribute('aria-label', 'Selecciona un departamento');
+        const defaultOption = createElement('option', '', 'Selecciona un departamento');
+        defaultOption.value = '';
+        departmentSelect.append(defaultOption);
+        state.departments.forEach((department) => {
+          const option = createElement('option', '', department.displayName);
+          option.value = department.departmentId;
+          if (department.departmentId === state[departmentKey]) {
+            option.selected = true;
+          }
+          departmentSelect.append(option);
+        });
+        departmentSelect.addEventListener('change', () => {
+          state[departmentKey] = departmentSelect.value ? Number(departmentSelect.value) : null;
+          state[resultsKey] = [];
+          state[errorKey] = '';
+          state[queryKey] = '';
+          if (state[departmentKey]) {
+            loadDepartmentArtworks(targetKey);
+          } else {
+            render();
+          }
+        });
+
+        const inputLabel = createElement('label', 'label', 'Buscar obra');
+        inputLabel.htmlFor = `search-${panelKey}`;
         const input = createElement('input', 'input');
-        input.placeholder = 'Busca una obra por título o artista';
-        input.value = targetKey === 'a' ? state.queryA : state.queryB;
+        input.id = `search-${panelKey}`;
+        input.placeholder = state[departmentKey]
+          ? 'Busca por título o artista en el departamento'
+          : 'Primero selecciona un departamento';
+        input.value = state[queryKey];
+        input.disabled = !state[departmentKey];
+
         const actionsRow = createElement('div', 'compare-actions');
+        const searchButton = createElement('button', 'button secondary', 'Buscar obras');
+        searchButton.type = 'button';
+        searchButton.disabled = !state[departmentKey];
+        searchButton.addEventListener('click', () => loadDepartmentArtworks(targetKey));
         const randomButton = createElement('button', 'button secondary', 'Obra aleatoria');
         randomButton.type = 'button';
-        randomButton.addEventListener('click', () => loadRandomArtwork(targetKey));
-        actionsRow.append(randomButton);
-        const resultsContainer = createElement('div', 'list-stack');
+        randomButton.disabled = !state[departmentKey];
+        randomButton.addEventListener('click', () => loadRandomArtwork(targetKey, state[departmentKey]));
+        actionsRow.append(searchButton, randomButton);
+
+        const resultsContainer = createElement('div', 'artwork-grid');
         const selectionPreview = createElement('div');
         const selectedArtwork = targetKey === 'a' ? state.a : state.b;
         if (selectedArtwork) {
-          selectionPreview.append(createElement('strong', '', 'Seleccionada: '), createElement('span', '', formatValue(selectedArtwork.title, 'Sin título')));
+          const selectedBox = createElement('div', 'selected-preview');
+          selectedBox.append(createElement('strong', '', 'Seleccionada: '));
+          selectedBox.append(createElement('span', '', formatValue(selectedArtwork.title, 'Sin título')));
+          selectionPreview.append(selectedBox);
         }
 
         let debounceTimer;
+        const controllerKey = targetKey === 'a' ? 'abortControllerA' : 'abortControllerB';
+        const requestKey = targetKey === 'a' ? 'activeRequestA' : 'activeRequestB';
         input.addEventListener('input', () => {
-          const queryKey = targetKey === 'a' ? 'queryA' : 'queryB';
-          const loadingKey = targetKey === 'a' ? 'loadingA' : 'loadingB';
-          const errorKey = targetKey === 'a' ? 'errorA' : 'errorB';
-          const resultsKey = targetKey === 'a' ? 'resultsA' : 'resultsB';
-          const requestKey = targetKey === 'a' ? 'activeRequestA' : 'activeRequestB';
-          const controllerKey = targetKey === 'a' ? 'abortControllerA' : 'abortControllerB';
-
+          const term = input.value.trim();
           state[queryKey] = input.value;
           clearTimeout(debounceTimer);
           debounceTimer = window.setTimeout(async () => {
             if (!active) return;
 
-            const term = input.value.trim();
             if (!term) {
               state[resultsKey] = [];
               state[errorKey] = '';
@@ -192,11 +322,19 @@ export async function renderCompare(rootElement, _param, params = {}) {
             render();
 
             try {
-              const data = await searchObjects({ q: term, hasImages: true, size: 5 }, { signal: controller.signal });
+              const params = {
+                q: term,
+                hasImages: true,
+                size: 20,
+              };
+              if (state[departmentKey]) {
+                params.departmentId = state[departmentKey];
+              }
+              const data = await searchObjects(params, { signal: controller.signal });
               if (!active || controller.signal.aborted || requestId !== state[requestKey]) return;
 
               const ids = data.objectIDs || [];
-              const resolved = await Promise.allSettled(ids.map((id) => getObjectById(id, { signal: controller.signal })));
+              const resolved = await Promise.allSettled(ids.slice(0, 15).map((id) => getObjectById(id, { signal: controller.signal })));
               if (!active || controller.signal.aborted || requestId !== state[requestKey]) return;
 
               const artworks = resolved.filter((item) => item.status === 'fulfilled').map((item) => item.value).filter(Boolean);
@@ -218,7 +356,6 @@ export async function renderCompare(rootElement, _param, params = {}) {
         const selectArtwork = (artwork) => {
           const otherKey = targetKey === 'a' ? 'b' : 'a';
           if (state[otherKey]?.objectID === artwork.objectID) {
-            const errorKey = targetKey === 'a' ? 'errorA' : 'errorB';
             state[errorKey] = 'Ya está seleccionada en el otro panel';
             render();
             return;
@@ -229,17 +366,26 @@ export async function renderCompare(rootElement, _param, params = {}) {
           } else {
             state.b = artwork;
           }
+
+          if (state.a && state.b) {
+            window.location.hash = `#compare?a=${state.a.objectID}&b=${state.b.objectID}`;
+            return;
+          }
           render();
         };
 
-        const loadingKey = targetKey === 'a' ? 'loadingA' : 'loadingB';
-        const errorKey = targetKey === 'a' ? 'errorA' : 'errorB';
-        const resultsKey = targetKey === 'a' ? 'resultsA' : 'resultsB';
-
-        if (state[loadingKey]) {
-          resultsContainer.append(createElement('p', 'state-text', 'Buscando...'));
+        if (state.loadingDepartments) {
+          resultsContainer.append(createElement('p', 'state-text', 'Cargando departamentos...'));
+        } else if (state.errorDepartments) {
+          resultsContainer.append(createElement('p', 'state-text', state.errorDepartments));
+        } else if (!state[departmentKey]) {
+          resultsContainer.append(createElement('p', 'state-text', 'Selecciona un departamento para ver las obras disponibles.'));
+        } else if (state[loadingKey]) {
+          resultsContainer.append(createElement('p', 'state-text', 'Buscando obras...'));
         } else if (state[errorKey]) {
           resultsContainer.append(createElement('p', 'state-text', state[errorKey]));
+        } else if (!state[resultsKey].length) {
+          resultsContainer.append(createElement('p', 'state-text', 'No se encontraron obras. Ajusta la búsqueda o prueba otro departamento.'));
         } else {
           state[resultsKey].forEach((artwork) => {
             const otherKey = targetKey === 'a' ? 'b' : 'a';
@@ -248,15 +394,45 @@ export async function renderCompare(rootElement, _param, params = {}) {
           });
         }
 
-        card.append(heading, input, actionsRow, selectionPreview, resultsContainer);
+        const helperText = createElement('p', 'helper-text', state[departmentKey]
+          ? 'Puedes buscar en este departamento o elegir una obra disponible.'
+          : 'Selecciona un departamento para acceder a las obras de ese sector.');
+
+        card.append(heading, departmentLabel, departmentSelect, helperText, inputLabel, input, actionsRow, selectionPreview, resultsContainer);
         return card;
       };
 
-      compareGrid.append(buildPanel('a'), buildPanel('b'));
+      const buildComparisonView = () => {
+        const compareView = createElement('section', 'compare-result');
+        const summaryRow = createElement('div', 'comparison-summary');
 
-      if (state.a && state.b) {
+        const buildSideCard = (artwork, label) => {
+          const sideCard = createElement('article', 'comparison-card');
+          sideCard.append(createElement('h3', '', label));
+          const image = createElement('img', 'result-image');
+          image.src = artwork.primaryImageSmall || artwork.primaryImage || '';
+          image.alt = artwork.title || 'Obra';
+          sideCard.append(image);
+          sideCard.append(createElement('h4', '', formatValue(artwork.title, 'Sin título')));
+          sideCard.append(createElement('p', 'card-meta', formatValue(artwork.artistDisplayName, 'Artista desconocido')));
+          image.style.cursor = 'pointer';
+          image.addEventListener('click', () => {
+            showFullscreenImage(image.src, image.alt);
+          });
+          const infoList = createElement('div', 'result-details');
+          infoList.append(createElement('p', '', `Año: ${formatValue(artwork.objectDate, '—')}`));
+          infoList.append(createElement('p', '', `Departamento: ${formatValue(artwork.department, '—')}`));
+          infoList.append(createElement('p', '', `Técnica: ${formatValue(artwork.medium, '—')}`));
+          infoList.append(createElement('p', '', `Cultura: ${formatValue(artwork.culture, '—')}`));
+          sideCard.append(infoList);
+          return sideCard;
+        };
+
+        summaryRow.append(buildSideCard(state.a, 'Obra A'), buildSideCard(state.b, 'Obra B'));
+        compareView.append(summaryRow);
+
         const tableCard = createElement('section', 'table-card');
-        const table = createElement('table');
+        const table = createElement('table', 'data-table');
         const tbody = createElement('tbody');
         const rows = [
           ['Artista', formatValue(state.a.artistDisplayName, 'Artista desconocido'), formatValue(state.b.artistDisplayName, 'Artista desconocido')],
@@ -278,23 +454,51 @@ export async function renderCompare(rootElement, _param, params = {}) {
         });
         table.append(tbody);
         tableCard.append(table);
-        compareGrid.append(tableCard);
+
+        const actions = createElement('div', 'compare-actions');
+        const backButton = createElement('button', 'button secondary', 'Volver al comparador');
+        backButton.type = 'button';
+        backButton.addEventListener('click', () => {
+          window.location.hash = '#compare';
+        });
+        actions.append(backButton);
+
+        compareView.append(tableCard, actions);
+        return compareView;
+      };
+
+      const isCompareMode = Boolean(params.a && params.b);
+
+      if (isCompareMode && state.a && state.b) {
+        const comparisonView = buildComparisonView();
+        rootElement.innerHTML = '';
+        rootElement.append(panel, comparisonView);
+        return;
       }
 
+      compareGrid.append(buildPanel('a'), buildPanel('b'));
       rootElement.innerHTML = '';
       rootElement.append(panel, compareGrid);
     };
 
-    if (params.preselectA) {
+    await fetchDepartmentsList();
+
+    const selectedAId = params.a || params.preselectA;
+    const selectedBId = params.b;
+    if (selectedAId || selectedBId) {
       try {
-        const preselected = await getObjectById(params.preselectA, { signal: state.abortControllerA?.signal });
+        const requests = [];
+        if (selectedAId) requests.push(getObjectById(selectedAId, { signal: state.abortControllerA?.signal }));
+        if (selectedBId) requests.push(getObjectById(selectedBId, { signal: state.abortControllerB?.signal }));
+        const results = await Promise.all(requests);
         if (!active) return;
-        state.a = preselected;
+        if (selectedAId) state.a = results.shift();
+        if (selectedBId) state.b = results.shift();
       } catch (error) {
         if (error.name === 'AbortError' || !active) {
           return;
         }
-        state.errorA = error.message || 'No se pudo cargar la obra preseleccionada';
+        state.errorA = error.message || 'No se pudo cargar la comparación';
       }
     }
 
@@ -309,4 +513,3 @@ export async function renderCompare(rootElement, _param, params = {}) {
     window.removeEventListener('hashchange', handleHashChange);
   }
 }
-

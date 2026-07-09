@@ -5,7 +5,6 @@ const PAGE_SIZE = 12;
 const YEAR_MIN = -5000;
 const YEAR_MAX = new Date().getFullYear();
 
-// 1. Parseo de parámetros de la URL
 function getFiltersFromParams(params = {}) {
   return {
     q: params.q || '',
@@ -18,8 +17,7 @@ function getFiltersFromParams(params = {}) {
   };
 }
 
-// 2. Construcción de la URL para el Router
-function buildHash(filters) {
+function buildHash(filters, route = 'explore') {
   const params = new URLSearchParams();
   if (filters.q) params.set('q', filters.q);
   if (filters.department) params.set('department', filters.department);
@@ -30,10 +28,9 @@ function buildHash(filters) {
   if (filters.page > 1) params.set('page', String(filters.page));
   
   const queryString = params.toString();
-  return `#explore${queryString ? `?${queryString}` : ''}`;
+  return `#${route}${queryString ? `?${queryString}` : ''}`;
 }
 
-// 3. Funciones auxiliares para la UI de Agregados
 function createMetric(label, value) {
   const item = createElement('div', 'stats-card');
   item.append(createElement('h4', '', label), createElement('p', '', formatValue(value, '—')));
@@ -65,7 +62,6 @@ function buildAggregates(artworks) {
   return { dominantDepartment, dominantCentury, dominantCulture };
 }
 
-// 4. Vista Principal
 export async function renderExplore(rootElement, _param, params = {}) {
   const filters = getFiltersFromParams(params);
   rootElement.innerHTML = '';
@@ -75,16 +71,14 @@ export async function renderExplore(rootElement, _param, params = {}) {
     const departmentsData = await fetchDepartments();
     const departments = departmentsData.departments || [];
 
-    // Delegamos TODO el trabajo de filtrado a la API del Met
     const searchParams = {
-      q: filters.q.trim() // Si está vacío, api.js se encargará de asignar 'a' por defecto para que no falle.
+      q: filters.q.trim()
     };
 
     if (filters.department) searchParams.departmentId = filters.department;
     if (filters.highlightOnly) searchParams.isHighlight = true;
     if (filters.hasImagesOnly) searchParams.hasImages = true;
     
-    // Soporte nativo de la API para rangos históricos
     if (filters.yearFrom || filters.yearTo) {
       searchParams.dateBegin = filters.yearFrom ? Number(filters.yearFrom) : YEAR_MIN;
       searchParams.dateEnd = filters.yearTo ? Number(filters.yearTo) : YEAR_MAX;
@@ -94,14 +88,11 @@ export async function renderExplore(rootElement, _param, params = {}) {
     const allIds = searchData.objectIDs || [];
     const totalResults = searchData.total || 0;
 
-    // Paginación limpia: cortamos los IDs directamente
     const startIndex = (filters.page - 1) * PAGE_SIZE;
     const pageIds = allIds.slice(startIndex, startIndex + PAGE_SIZE);
     
-    // Resolvemos únicamente los IDs de la página actual
     const artworks = await resolveArtworkIds(pageIds);
 
-    // -- CONSTRUCCIÓN DE LA INTERFAZ --
     const panel = createElement('section', 'panel');
     const title = createElement('h2', '', 'Explorar colección');
     const intro = createElement('p', '', 'Busca, filtra y navega por la colección del Met. Los resultados se adaptan a cualquier combinación de filtros.');
@@ -113,7 +104,6 @@ export async function renderExplore(rootElement, _param, params = {}) {
 
     const formGrid = createElement('div', 'form-grid');
     
-    // Buscador de texto
     const searchInput = createElement('input', 'input');
     searchInput.placeholder = 'Buscar por título, artista o tema (opcional)';
     searchInput.value = filters.q;
@@ -127,15 +117,18 @@ export async function renderExplore(rootElement, _param, params = {}) {
     searchInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        submitSearch();
+        const nextFilters = { ...filters, q: searchInput.value.trim(), page: 1 };
+        window.location.hash = buildHash(nextFilters, 'results');
       }
     });
 
     const searchButton = createElement('button', 'button', 'Buscar');
     searchButton.type = 'button';
-    searchButton.addEventListener('click', submitSearch);
+    searchButton.addEventListener('click', () => {
+      const nextFilters = { ...filters, q: searchInput.value.trim(), page: 1 };
+      window.location.hash = buildHash(nextFilters, 'results');
+    });
 
-    // Selector de Departamentos
     const deptSelect = createElement('select', 'select');
     const defaultOption = createElement('option', '', 'Todos los departamentos');
     defaultOption.value = '';
@@ -155,7 +148,6 @@ export async function renderExplore(rootElement, _param, params = {}) {
       window.location.hash = buildHash(nextFilters);
     });
 
-    // Control de Años (Desde)
     function getEraOptions(selectedYear) {
       const era = Number(selectedYear) < 0 ? 'BC' : 'AD';
       const absoluteYear = selectedYear ? String(Math.abs(Number(selectedYear))) : '';
@@ -220,7 +212,6 @@ export async function renderExplore(rootElement, _param, params = {}) {
     yearToInput.addEventListener('change', watchYears);
     yearToSelect.addEventListener('change', watchYears);
 
-    // Checkboxes
     const highlightBox = createElement('label', 'checkbox-row');
     const highlightCheckbox = createElement('input');
     highlightCheckbox.type = 'checkbox';
@@ -241,7 +232,6 @@ export async function renderExplore(rootElement, _param, params = {}) {
     });
     imageBox.append(imageCheckbox, createElement('span', '', 'Solo con imagen'));
 
-    // Botón de Limpieza
     const clearButton = createElement('button', 'button secondary', 'Limpiar filtros');
     clearButton.type = 'button';
     clearButton.addEventListener('click', () => {
@@ -260,21 +250,66 @@ export async function renderExplore(rootElement, _param, params = {}) {
     );
     controls.append(controlTitle, formGrid);
 
-    // Panel de Agregados
-    const stats = createElement('section', 'grid');
+    rootElement.innerHTML = '';
+    rootElement.append(panel, controls);
+  } catch (error) {
+    rootElement.innerHTML = '';
+    rootElement.append(createErrorState(error.message || 'Error de conexión con el museo', () => renderExplore(rootElement, _param, params)));
+  }
+}
+
+export async function renderResults(rootElement, _param, params = {}) {
+  const filters = getFiltersFromParams(params);
+  rootElement.innerHTML = '';
+  rootElement.append(createLoadingState('Cargando resultados...'));
+
+  try {
+    const searchParams = {
+      q: filters.q.trim()
+    };
+
+    if (filters.department) searchParams.departmentId = filters.department;
+    if (filters.highlightOnly) searchParams.isHighlight = true;
+    if (filters.hasImagesOnly) searchParams.hasImages = true;
+    if (filters.yearFrom || filters.yearTo) {
+      searchParams.dateBegin = filters.yearFrom ? Number(filters.yearFrom) : YEAR_MIN;
+      searchParams.dateEnd = filters.yearTo ? Number(filters.yearTo) : YEAR_MAX;
+    }
+
+    const searchData = await searchObjects(searchParams);
+    const allIds = searchData.objectIDs || [];
+    const totalResults = searchData.total || 0;
+    const startIndex = (filters.page - 1) * PAGE_SIZE;
+    const pageIds = allIds.slice(startIndex, startIndex + PAGE_SIZE);
+    const artworks = await resolveArtworkIds(pageIds);
+
+    const panel = createElement('section', 'panel results-panel');
+    const header = createElement('div', 'results-header');
+    const headerInfo = createElement('div', 'results-header-info');
+    const title = createElement('h2', '', 'Resultados de búsqueda');
+    const summary = createElement('p', 'results-subtitle', 'Navega entre las obras que coinciden con tus filtros.');
+    headerInfo.append(title, summary);
+
+    const headerActions = createElement('div', 'results-header-actions');
+    const backButton = createElement('button', 'button secondary', 'Volver al explorador');
+    backButton.type = 'button';
+    backButton.addEventListener('click', () => {
+      window.location.hash = '#explore';
+    });
+    headerActions.append(backButton);
+    header.append(headerInfo, headerActions);
+    panel.append(header);
+
+    const stats = createElement('section', 'stats-grid results-stats');
     const aggregates = buildAggregates(artworks);
     stats.append(
-      createMetric('Total de resultados (Búsqueda)', totalResults),
-      createMetric('Obras cargadas (Página)', artworks.length),
+      createMetric('Total de resultados', totalResults),
       createMetric('Departamento dominante', aggregates.dominantDepartment),
       createMetric('Siglo más frecuente', aggregates.dominantCentury),
       createMetric('Cultura dominante', aggregates.dominantCulture)
     );
 
-    const note = createElement('p', 'state-text', 'Nota: Los agregados (departamento, siglo, cultura) se calculan en vivo únicamente sobre las obras visibles en esta página, cumpliendo con la exigencia técnica del requerimiento.');
-
-    // Galería
-    const gallery = createElement('section', 'grid');
+    const gallery = createElement('section', 'grid results-gallery');
     if (!artworks.length) {
       gallery.append(createEmptyState('No se encontraron obras con los filtros aplicados. Intenta ampliar la búsqueda.'));
     } else {
@@ -285,32 +320,31 @@ export async function renderExplore(rootElement, _param, params = {}) {
       });
     }
 
-    // Paginación
     const pagination = createElement('div', 'pagination');
     const prevButton = createElement('button', 'button secondary', 'Anterior');
     prevButton.disabled = filters.page === 1;
     prevButton.addEventListener('click', () => {
       const nextFilters = { ...filters, page: Math.max(1, filters.page - 1) };
-      window.location.hash = buildHash(nextFilters);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.location.hash = buildHash(nextFilters, 'results');
     });
 
-    const totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE));
-    const pageLabel = createElement('span', '', `Página ${filters.page} de ${totalPages}`);
-    
     const nextButton = createElement('button', 'button secondary', 'Siguiente');
-    nextButton.disabled = filters.page >= totalPages;
+    nextButton.disabled = filters.page >= Math.max(1, Math.ceil(totalResults / PAGE_SIZE));
     nextButton.addEventListener('click', () => {
       const nextFilters = { ...filters, page: filters.page + 1 };
-      window.location.hash = buildHash(nextFilters);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.location.hash = buildHash(nextFilters, 'results');
     });
-    
-    pagination.append(prevButton, pageLabel, nextButton);
+
+    pagination.append(prevButton, nextButton);
 
     rootElement.innerHTML = '';
-    rootElement.append(panel, controls, stats, note, gallery, pagination);
-    
+    rootElement.append(panel, stats, gallery);
+    pagination.classList.add('results-pagination');
+    rootElement.append(pagination);
   } catch (error) {
     rootElement.innerHTML = '';
-    rootElement.append(createErrorState(error.message || 'Error de conexión con el museo', () => renderExplore(rootElement, _param, params)));
+    rootElement.append(createErrorState(error.message || 'Error de conexión con el museo', () => renderResults(rootElement, _param, params)));
   }
 }

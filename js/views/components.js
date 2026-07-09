@@ -10,11 +10,15 @@ export function createArtworkCard(artwork, onClick) {
   const imgUrl = artwork.primaryImageSmall || artwork.primaryImage;
   
   const img = createElement('img', 'card-image');
-  img.src = imgUrl;
-  img.alt = artwork.title;
+  const placeholder = 'https://via.placeholder.com/280x280?text=Sin+Imagen';
+  img.src = imgUrl || placeholder;
+  img.alt = artwork.title || 'Sin título';
+  img.loading = 'lazy';
   img.onload = () => img.classList.add('loaded');
   img.onerror = () => {
-    img.src = 'https://via.placeholder.com/280x280?text=Sin+Imagen';
+    if (img.src !== placeholder) {
+      img.src = placeholder;
+    }
   };
   
   card.append(img);
@@ -42,7 +46,16 @@ export function createErrorState(text, retry) {
   return div;
 }
 
+export function showFullscreenImage(src, alt = 'Imagen') {
+  const overlay = createElement('div', 'image-fullscreen-overlay');
+  const image = createElement('img', 'fullscreen-image');
+  image.src = src;
+  image.alt = alt;
+  overlay.append(image);
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.append(overlay);
+}
+
 export function formatValue(val, fallback) {
   return val ? val : fallback;
 }
-

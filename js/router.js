@@ -1,5 +1,5 @@
 import { renderHome } from './views/home.js';
-import { renderExplore } from './views/explore.js';
+import { renderExplore, renderResults } from './views/explore.js';
 import { renderDepartments } from './views/departments.js';
 import { renderCompare } from './views/compare.js';
 import { renderDetail } from './views/detail.js';
@@ -8,6 +8,7 @@ import { renderArtist } from './views/artist.js';
 const views = {
   home: renderHome,
   explore: renderExplore,
+  results: renderResults,
   departments: renderDepartments,
   compare: renderCompare,
   detail: renderDetail,

@@ -50,12 +50,12 @@ export async function renderHome(rootElement) {
 
     const hero = createElement('section', 'hero');
     hero.append(
-      createElement('h1', '', 'MetHub: Explorando el Metropolitan Museum of Art'),
-      createElement('p', '', 'Una entrada clara al Metropolitan Museum of Art: datos relevantes, departamentos de las obras y una selección de arte perfectamente curada.')
+      createElement('h1', '', 'MetHub — Colección digital del Met'),
+      createElement('p', '', 'Descubre obras de arte, departamentos curatoriales y artistas del Metropolitan Museum of Art desde una interfaz clara y moderna.')
     );
 
     const heroActions = createElement('div', 'hero-actions');
-    const exploreButton = createElement('button', 'button', 'Ir a explorar');
+    const exploreButton = createElement('button', 'button', 'Explorar colección');
     exploreButton.type = 'button';
     exploreButton.addEventListener('click', () => {
       window.location.hash = '#explore';
@@ -65,8 +65,8 @@ export async function renderHome(rootElement) {
 
     const overview = createElement('section', 'panel home-overview');
     overview.append(
-      createElement('h2', '', '¿Qué es el Metropolitan Museum of Art?'),
-      createElement('p', '', 'El Metropolitan Museum of Art es el museo más grande de arte del mundo, con una colección que abarca más de 5.000 años de historia. Desde arte antiguo hasta obras contemporáneas, el museo alberga más de 2 millones de piezas, incluyendo pinturas, esculturas, textiles, armas y armaduras, instrumentos musicales y mucho más. Su misión es preservar y exhibir estas obras para la educación y disfrute del público.'),
+      createElement('h2', '', 'Colección global del Met'),
+      createElement('p', '', 'MetHub facilita el acceso a la colección pública del Metropolitan Museum of Art con búsquedas intuitivas, filtros potentes y fichas detalladas de obra.')
     );
 
     const yearRange = getArtworkYearRange(artworks);
@@ -84,8 +84,12 @@ export async function renderHome(rootElement) {
         yearRange ? `Encontrarás obras desde ${formatYearLabel(yearRange.from)} hasta ${formatYearLabel(yearRange.to)}` : 'Rango de fechas no disponible'
       )
     );
-    const refreshCard = createElement('article', 'stats-card');
-    refreshCard.append(createElement('h3', '', 'Selección renovada'), createElement('p', '', '¡Haz clic para una nueva selección de obras!'));
+    const refreshCard = createElement('button', 'stats-card refresh-card');
+    refreshCard.type = 'button';
+    refreshCard.append(createElement('h3', '', 'Actualizar selección'), createElement('p', '', 'Genera una nueva selección de obras destacadas.'));
+    refreshCard.addEventListener('click', () => {
+      renderHome(rootElement);
+    });
     stats.append(departmentCard, worksCard, evolutionCard, refreshCard);
 
     const galleryTitle = createElement('h2', 'gallery-title', 'Selección fresca de obras');
