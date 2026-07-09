@@ -1,5 +1,5 @@
-import { fetchDepartments, resolveArtworkIds, searchObjects } from '../api.js';
-import { createArtworkCard, createElement, createEmptyState, createErrorState, createLoadingState, formatValue } from './components.js';
+import { fetchDepartments } from '../api.js';
+import { createElement, createErrorState, createLoadingState, formatValue } from './components.js';
 
 const PAGE_SIZE = 12;
 const YEAR_MIN = -5000;
@@ -71,32 +71,11 @@ export async function renderExplore(rootElement, _param, params = {}) {
     const departmentsData = await fetchDepartments();
     const departments = departmentsData.departments || [];
 
-    const searchParams = {
-      q: filters.q.trim()
-    };
-
-    if (filters.department) searchParams.departmentId = filters.department;
-    if (filters.highlightOnly) searchParams.isHighlight = true;
-    if (filters.hasImagesOnly) searchParams.hasImages = true;
-    
-    if (filters.yearFrom || filters.yearTo) {
-      searchParams.dateBegin = filters.yearFrom ? Number(filters.yearFrom) : YEAR_MIN;
-      searchParams.dateEnd = filters.yearTo ? Number(filters.yearTo) : YEAR_MAX;
-    }
-
-    const searchData = await searchObjects(searchParams);
-    const allIds = searchData.objectIDs || [];
-    const totalResults = searchData.total || 0;
-
-    const startIndex = (filters.page - 1) * PAGE_SIZE;
-    const pageIds = allIds.slice(startIndex, startIndex + PAGE_SIZE);
-    
-    const artworks = await resolveArtworkIds(pageIds);
-
     const panel = createElement('section', 'panel');
     const title = createElement('h2', '', 'Explorar colección');
     const intro = createElement('p', '', 'Busca, filtra y navega por la colección del Met. Los resultados se adaptan a cualquier combinación de filtros.');
-    panel.append(title, intro);
+    const guide = createElement('p', 'state-text', 'Presiona Buscar para ver los resultados en una página separada.');
+    panel.append(title, intro, guide);
 
     const controls = createElement('section', 'filter-box');
     const controlTitle = createElement('h3', '', 'Filtros avanzados');
@@ -288,7 +267,8 @@ export async function renderResults(rootElement, _param, params = {}) {
     const headerInfo = createElement('div', 'results-header-info');
     const title = createElement('h2', '', 'Resultados de búsqueda');
     const summary = createElement('p', 'results-subtitle', 'Navega entre las obras que coinciden con tus filtros.');
-    headerInfo.append(title, summary);
+    const pageInfo = createElement('p', 'results-pageinfo', `Página ${filters.page} de ${Math.max(1, Math.ceil(totalResults / PAGE_SIZE))}`);
+    headerInfo.append(title, summary, pageInfo);
 
     const headerActions = createElement('div', 'results-header-actions');
     const backButton = createElement('button', 'button secondary', 'Volver al explorador');
