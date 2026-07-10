@@ -50,7 +50,7 @@ export async function renderHome(rootElement) {
 
     const hero = createElement('section', 'hero');
     hero.append(
-      createElement('h1', '', 'MetHub — Colección digital del Met'),
+      createElement('h1', '', 'MetHub: Colección digital del Metropolitan Museum of Art'),
       createElement('p', '', 'Descubre obras de arte, departamentos curatoriales y artistas del Metropolitan Museum of Art desde una interfaz clara y moderna.')
     );
 
