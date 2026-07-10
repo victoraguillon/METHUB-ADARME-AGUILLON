@@ -1,5 +1,5 @@
-import { fetchDepartments } from '../api.js';
-import { createElement, createErrorState, createLoadingState, formatValue } from './components.js';
+import { fetchDepartments, searchObjects, resolveArtworkIds } from '../api.js';
+import { createElement, createErrorState, createEmptyState, createLoadingState, createArtworkCard, formatValue } from './components.js';
 
 const PAGE_SIZE = 12;
 const YEAR_MIN = -5000;
@@ -88,25 +88,34 @@ export async function renderExplore(rootElement, _param, params = {}) {
     searchInput.value = filters.q;
     searchInput.autocomplete = 'off';
 
+    const getCurrentFormFilters = () => {
+      return {
+        ...filters,
+        q: searchInput.value.trim(),
+        department: deptSelect.value,
+        yearFrom: buildYearValue(yearFromInput, yearFromSelect.value),
+        yearTo: buildYearValue(yearToInput, yearToSelect.value),
+        highlightOnly: highlightCheckbox.checked,
+        hasImagesOnly: imageCheckbox.checked,
+        page: 1
+      };
+    };
+
     const submitSearch = () => {
-      const nextFilters = { ...filters, q: searchInput.value.trim(), page: 1 };
-      window.location.hash = buildHash(nextFilters);
+      const nextFilters = getCurrentFormFilters();
+      window.location.hash = buildHash(nextFilters, 'results');
     };
 
     searchInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        const nextFilters = { ...filters, q: searchInput.value.trim(), page: 1 };
-        window.location.hash = buildHash(nextFilters, 'results');
+        submitSearch();
       }
     });
 
     const searchButton = createElement('button', 'button', 'Buscar');
     searchButton.type = 'button';
-    searchButton.addEventListener('click', () => {
-      const nextFilters = { ...filters, q: searchInput.value.trim(), page: 1 };
-      window.location.hash = buildHash(nextFilters, 'results');
-    });
+    searchButton.addEventListener('click', submitSearch);
 
     const deptSelect = createElement('select', 'select');
     const defaultOption = createElement('option', '', 'Todos los departamentos');
@@ -123,7 +132,7 @@ export async function renderExplore(rootElement, _param, params = {}) {
     });
 
     deptSelect.addEventListener('change', () => {
-      const nextFilters = { ...filters, department: deptSelect.value, page: 1 };
+      const nextFilters = getCurrentFormFilters();
       window.location.hash = buildHash(nextFilters);
     });
 
@@ -177,12 +186,7 @@ export async function renderExplore(rootElement, _param, params = {}) {
     }
 
     const watchYears = () => {
-      const nextFilters = {
-        ...filters,
-        yearFrom: buildYearValue(yearFromInput, yearFromSelect.value),
-        yearTo: buildYearValue(yearToInput, yearToSelect.value),
-        page: 1
-      };
+      const nextFilters = getCurrentFormFilters();
       window.location.hash = buildHash(nextFilters);
     };
 
@@ -196,7 +200,7 @@ export async function renderExplore(rootElement, _param, params = {}) {
     highlightCheckbox.type = 'checkbox';
     highlightCheckbox.checked = filters.highlightOnly;
     highlightCheckbox.addEventListener('change', () => {
-      const nextFilters = { ...filters, highlightOnly: highlightCheckbox.checked, page: 1 };
+      const nextFilters = getCurrentFormFilters();
       window.location.hash = buildHash(nextFilters);
     });
     highlightBox.append(highlightCheckbox, createElement('span', '', 'Solo obras destacadas'));
@@ -206,7 +210,7 @@ export async function renderExplore(rootElement, _param, params = {}) {
     imageCheckbox.type = 'checkbox';
     imageCheckbox.checked = filters.hasImagesOnly;
     imageCheckbox.addEventListener('change', () => {
-      const nextFilters = { ...filters, hasImagesOnly: imageCheckbox.checked, page: 1 };
+      const nextFilters = getCurrentFormFilters();
       window.location.hash = buildHash(nextFilters);
     });
     imageBox.append(imageCheckbox, createElement('span', '', 'Solo con imagen'));
